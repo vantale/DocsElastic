@@ -1,0 +1,154 @@
+﻿h1. Metricbeat — Karta komponentu (podstawowa)
+_Ostatnia aktualizacja: 2025-08-20_
+
+{toc:maxLevel=2|type=list|outline=true}
+
+h2. 1) Cel komponentu (po co)
+Lekki agent zbierający *metryki systemowe i usług* (CPU, pamięć, dysk, sieć, procesy, liczniki Windows/Perfmon, IIS itd.) i wysyłający je do Elasticsearch. Wizualizacja metryk w *Kibana → Metrics (Hosts/Inventory, Metrics Explorer)*.
+
+h2. 2) Możliwości (na start)
+* Metryki systemowe: *CPU, pamięć, filesystem, I/O dysku, sieć, procesy*.
+* Windows: *liczniki Perfmon*, podstawowy *status usług*, opcjonalnie metryki *IIS*.
+* Publikacja do strumieni danych *metrics-* (zestawy danych jak *system.*, *windows.*, *iis.*).
+
+h2. 3) Wymagania minimalne (aby w ogóle się komunikował)
+* *Elasticsearch endpoint:* https://<ES_HOST>:<PORT> (wyjście z serwera dostępne).
+* *Uwierzytelnienie:* username+password _lub_ api_key (id:secret) z prawem zapisu do *metrics-*.
+* *TLS:* CA zaufana przez Windows _lub_ *verification_mode: certificate* z podaniem pliku CA.
+* *Uprawnienia Windows:* Administrator do instalacji usługi.
+* (Opcjonalnie) *Kibana endpoint* do setupu/dashboardów; nie jest wymagany do samej wysyłki danych.
+
+h2. 4) Instalacja offline (Windows, ZIP)
+*Ścieżka bazowa:* C:\Elastic\metricbeat\
+
+# Skopiuj i rozpakuj ZIP Metricbeat do *C:\Elastic\metricbeat\*.
+# (Opcjonalnie) Keystore na sekrety:
+{code:language=powershell|title=Keystore (opcjonalnie)}
+cd C:\Elastic\metricbeat
+.\metricbeat.exe keystore create
+.\metricbeat.exe keystore add ES_PASSWORD
+# lub:
+.\metricbeat.exe keystore add ES_API_KEY
+{code}
+# Skonfiguruj *C:\Elastic\metricbeat\metricbeat.yml* (patrz sekcja 5).
+# Testy wstępne:
+{code:language=powershell|title=Pre-flight tests}
+.\metricbeat.exe test config -c .\metricbeat.yml -e
+.\metricbeat.exe test output -e
+{code}
+# Instalacja jako usługa Windows (Admin):
+{code:language=powershell|title=Instalacja usługi}
+.\install-service-metricbeat.ps1
+Set-Service -Name metricbeat -StartupType Automatic
+Start-Service metricbeat
+Get-Service metricbeat
+{code}
+# Weryfikacja: metryki powinny pojawić się w Kibanie w ciągu 1–2 minut (sekcja 7).
+
+*Deinstalacja (opcjonalnie):*
+{code:language=powershell|title=Deinstalacja}
+Stop-Service metricbeat
+.\uninstall-service-metricbeat.ps1
+{code}
+
+h2. 5) Konfiguracja minimalna (YAML)
+
+h3. 5.1 Moduły — System (zalecana baza)
+{code:language=yaml|title=metricbeat.yml — moduł system}
+metricbeat.modules:
+  - module: system
+    period: 30s
+    metricsets:
+      - cpu
+      - memory
+      - network
+      - filesystem
+      - diskio
+      - process
+      - process_summary
+    processes: ['.*']
+    process.include_top_n:
+      by_cpu: 5
+      by_memory: 5
+{code}
+
+h3. 5.2 (Opcjonalnie) Moduły — liczniki Windows (Perfmon)
+{code:language=yaml|title=windows perfmon (opcjonalnie)}
+  - module: windows
+    period: 30s
+    metricsets: [ "perfmon" ]
+    perfmon.counters:
+      - instance_label: "Processor"
+        measurement_label: "CPU Total %"
+        query: '\Processor(_Total)\% Processor Time'
+      - instance_label: "Memory"
+        measurement_label: "Available MBytes"
+        query: '\Memory\Available MBytes'
+{code}
+
+h3. 5.3 (Opcjonalnie) Moduły — IIS (jeśli zainstalowany)
+{code:language=yaml|title=moduł iis (opcjonalnie)}
+  - module: iis
+    period: 30s
+    metricsets: [ "webserver", "website" ]
+{code}
+
+h3. 5.4 Wyjście do Elasticsearch (wybierz *JEDNO*)
+
+*Wariant A — username/password (zalecane przez keystore):*
+{code:language=yaml|title=Elasticsearch output — user/pass}
+output.elasticsearch:
+  hosts: ["https://<ES_HOST>:<PORT>"]
+  username: "<ES_USER>"
+  password: "${ES_PASSWORD}"
+{code}
+
+*Wariant B — API key:*
+{code:language=yaml|title=Elasticsearch output — API key}
+output.elasticsearch:
+  hosts: ["https://<ES_HOST>:<PORT>"]
+  api_key: "${ES_API_KEY}"   # id:secret
+{code}
+
+h3. 5.5 TLS (zaufanie do CA)
+{code:language=yaml|title=TLS}
+ssl:
+  verification_mode: "certificate"
+  # certificate_authorities: ["C:/Elastic/certs/ca.crt"]  # dla prywatnej CA
+{code}
+
+h3. 5.6 (Opcjonalnie) Kibana do setupu/dashboardów
+{code:language=yaml|title=Kibana (opcjonalnie)}
+setup.kibana:
+  host: "https://<KIBANA_HOST>:<PORT>"
+  # username: "<KB_USER>"
+  # password: "<KB_PASSWORD>"
+{code}
+
+h2. 6) Uruchomienie — smoke test
+# .\metricbeat.exe test config -c .\metricbeat.yml -e → *OK*
+# .\metricbeat.exe test output -e → *OK*
+# Uruchom usługę i potwierdź stan *Running*.
+# Sprawdź istnienie strumienia *metrics-* (sekcja 7).
+
+h2. 7) Gdzie w Kibanie widać rezultaty
+* *Observability → Metrics*: *Hosts/Inventory* oraz *Metrics Explorer* (per host/per metryka).
+* *Discover* (przykłady KQL):
+** data_stream.dataset : "system.cpu"
+** data_stream.dataset : "system.memory"
+** data_stream.dataset : "windows.perfmon"
+** event.module : "iis"
+
+h2. 8) Najczęstsze problemy (krótko)
+* *401/403* — nieprawidłowe dane lub API key bez prawa zapisu do *metrics-*.
+* *Błędy TLS* — prywatna/niezaufana CA: ustaw *certificate_authorities* albo zaimportuj CA do Windows.
+* *Brak danych* — zły host ES, blokada firewalla na wyjściu, usługa nie działa.
+* *Puste metryki IIS* — brak roli/liczników IIS; włącz IIS i upewnij się, że liczniki są dostępne.
+
+h2. Aneks — Krótka checklista instalacji
+* [ ] ZIP rozpakowany do *C:\Elastic\metricbeat\*
+* [ ] Uzupełniony *metricbeat.yml* (moduły, ES host, auth, TLS)
+* [ ] (Opcjonalnie) sekrety dodane do keystore
+* [ ] *test config* i *test output* dają *OK*
+* [ ] Usługa zainstalowana i *Running*
+* [ ] Dane widoczne w *Metrics (Hosts/Inventory)* / *Discover*

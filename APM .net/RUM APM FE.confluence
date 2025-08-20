@@ -1,0 +1,169 @@
+﻿h1. APM dla Angular 15 (RUM JS) — Karta komponentu (podstawowa)
+_Ostatnia aktualizacja: 2025-08-20_
+
+{toc:maxLevel=2|type=list|outline=true}
+
+h2. 1) Cel komponentu (po co)
+Real User Monitoring (RUM) dla aplikacji *Angular 15* — zbiera *czasy ładowania (page-load), nawigacje SPA (route-change), żądania XHR/fetch, błędy JS* i podstawowe metryki użytkownika. Dane trafiają do APM Server i są widoczne w *Kibana → APM (Services/Traces/Errors/Dependencies)*.
+
+h2. 2) Możliwości (na start)
+* Automatyczna instrumentacja *page-load* i *route-change* (Angular Router).
+* Rejestrowanie *XHR/fetch*, błędów JS (*ErrorHandler*), metryk wydajności przeglądarki.
+* *Distributed tracing* od przeglądarki do backendu (z *distributedTracingOrigins*).
+* Publikacja do strumieni APM (traces/errors/metrics) widocznych w APM UI.
+
+h2. 3) Wymagania minimalne (aby w ogóle się komunikował)
+* *APM Server URL (RUM włączony):* https://<APM_HOST>:8200
+* *RUM bez uwierzytelniania:* włączony (przeglądarka nie podaje tokenów).
+* *CORS/Origins:* domena Twojej aplikacji (np. https://app.moje.pl) dodana do *allow_origins*.
+* *Service name & environment:* unikalne *service.name* i *environment* w konfiguracji agenta.
+* (Opcjonalnie) *distributedTracingOrigins* dla zapytań *cross-origin* do backendów.
+
+h2. 4) Instalacja offline (Angular 15, bez Internetu)
+
+*Wariant A — paczki NPM z plików *.tgz* (rekomendowany):*
+# Na maszynie *online*:
+{code:language=bash|title=Przygotowanie paczek (online)}
+npm pack @elastic/apm-rum@<wersja>
+npm pack @elastic/apm-rum-angular@<wersja>
+# powstaną m.in.:
+#  - elastic-apm-rum-<wersja>.tgz
+#  - apm-rum-angular-<wersja>.tgz
+{code}
+# Przenieś *.tgz* na serwer offline.
+# W katalogu projektu Angular (offline) zainstaluj z plików:
+{code:language=bash|title=Instalacja z .tgz (offline)}
+npm i --no-audit --no-fund ./elastic-apm-rum-<wersja>.tgz ./apm-rum-angular-<wersja>.tgz
+{code}
+
+*Wariant B — lokalny rejestr (np. Verdaccio):* skonfiguruj mirror NPM w sieci lokalnej i wskaż go w *.npmrc*; następnie *npm i @elastic/apm-rum @elastic/apm-rum-angular*.
+
+h2. 5) Konfiguracja minimalna
+
+h3. 5.1 Integracja *module-based* (typowa dla wielu projektów Angular 15)
+{code:language=typescript|title=app.module.ts — integracja z @elastic/apm-rum-angular}
+import { NgModule, ErrorHandler } from '@angular/core';
+import { BrowserModule } from '@angular/platform-browser';
+import { Routes, RouterModule } from '@angular/router';
+import { ApmModule, ApmService, ApmErrorHandler } from '@elastic/apm-rum-angular';
+
+const routes: Routes = [
+  // ... Twoje trasy
+];
+
+@NgModule({
+  imports: [
+    BrowserModule,
+    RouterModule.forRoot(routes, { initialNavigation: 'enabledBlocking' }),
+    ApmModule
+  ],
+  declarations: [/* AppComponent, ... */],
+  providers: [
+    ApmService,
+    { provide: ErrorHandler, useClass: ApmErrorHandler } // przechwytywanie błędów (zalecane)
+  ],
+  bootstrap: [/* AppComponent */]
+})
+export class AppModule {
+  constructor(apmService: ApmService) {
+    // Start agenta jak najwcześniej
+    apmService.init({
+      serviceName: 'frontend-angular15',
+      serverUrl: 'https://<APM_HOST>:8200',
+      environment: 'prod',
+      distributedTracingOrigins: ['https://api.moje.pl'],
+      // pageLoadTransactionName: window.location.pathname // opcjonalnie
+    });
+  }
+}
+{code}
+
+h3. 5.2 Integracja *standalone* (Angular 15 bez NgModule)
+{code:language=typescript|title=main.ts — integracja standalone}
+import { bootstrapApplication, importProvidersFrom, ErrorHandler } from '@angular/core';
+import { provideRouter } from '@angular/router';
+import { ApmModule, ApmService, ApmErrorHandler } from '@elastic/apm-rum-angular';
+import { AppComponent } from './app/app.component';
+import { routes } from './app/app.routes';
+
+bootstrapApplication(AppComponent, {
+  providers: [
+    provideRouter(routes),
+    importProvidersFrom(ApmModule), // włącza integrację routera z APM
+    ApmService,
+    { provide: ErrorHandler, useClass: ApmErrorHandler }
+  ]
+}).then(ref => {
+  const apm = ref.injector.get(ApmService);
+  apm.init({
+    serviceName: 'frontend-angular15',
+    serverUrl: 'https://<APM_HOST>:8200',
+    environment: 'prod',
+    distributedTracingOrigins: ['https://api.moje.pl']
+  });
+});
+{code}
+
+h3. 5.3 Konfiguracja APM Server (RUM)
+{code:language=yaml|title=apm-server.yml — ustawienia RUM (przykład)}
+apm-server.rum.enabled: true
+apm-server.rum.allow_origins: ['https://app.moje.pl']   # dokładna domena (uwzględnij port!)
+# (opcjonalnie) limity i anonimowy dostęp:
+apm-server.auth.anonymous.rate_limit.event_limit: 300
+apm-server.auth.anonymous.rate_limit.ip_limit: 1000
+apm-server.auth.anonymous.allow_service: ['frontend-angular15']
+# (opcjonalnie) dodatkowe nagłówki CORS:
+# apm-server.rum.allow_headers: ["Authorization","X-Custom-Header"]
+{code}
+*Uwaga (Fleet):* jeśli APM jest zarządzany przez *Fleet*, powyższe pola ustawisz w Integracji *Elastic APM → Real User Monitoring (RUM)*.
+
+h3. 5.4 Source maps (opcjonalnie, zalecane)
+* W Angular 15 włącz *sourceMap* w *angular.json* lub podczas builda.
+{code:language=json|title=angular.json — fragment}
+{
+  "projects": {
+    "twoj-projekt": {
+      "architect": {
+        "build": {
+          "configurations": {
+            "production": {
+              "sourceMap": true
+            }
+          }
+        }
+      }
+    }
+  }
+}
+{code}
+* Prześlij mapy do APM/Elasticsearch (wg procedury wewnętrznej) i włącz *source_mapping* po stronie APM Server.
+
+h2. 6) Uruchomienie — smoke test
+# Zbuduj i uruchom Angular 15; odwiedź stronę i przejdź kilka tras.
+# *DevTools → Network*: szukaj żądań do */intake/v2/rum/events* (kod 202/204).
+# Jeśli błąd CORS — sprawdź *allow_origins* i ewentualne *allow_headers*.
+# Tymczasowo włącz logowanie debugujące w kliencie (flagi uruchomieniowe/console) na czas testów.
+
+h2. 7) Gdzie w Kibanie widać rezultaty
+* *APM → Services*: lista usług RUM (np. *frontend-angular15*), *Latency/Throughput/Failed transaction rate*, *Errors*, *Dependencies*, *Service map*.
+* *APM → Traces*: transakcje *page-load* i *route-change* + zależności.
+* *Discover* (przykłady KQL):
+** processor.event : "transaction"
+** processor.event : "span"
+** service.name : "frontend-angular15"
+** event.outcome : "failure"
+
+h2. 8) Najczęstsze problemy (krótko)
+* *CORS/Origin* — brak dopasowania *allow_origins* do domeny (i portu) aplikacji.
+* *Mixed content* — strona HTTPS, APM Server HTTP → wymuś HTTPS na APM.
+* *Brak cross-origin tracing* — dodaj backendy do *distributedTracingOrigins* (pełne originy).
+* *Brak danych* — RUM wyłączony, zły *APM_HOST*, firewall (8200/TLS), inicjalizacja za późno (APM startuje po pierwszych nawigacjach).
+* *Nazewnictwo* — niespójne *service.name/environment* między środowiskami → ujednolicić.
+
+h2. Aneks — Krótka checklista
+* [ ] Zainstalowano *@elastic/apm-rum* i *@elastic/apm-rum-angular* (offline: *.tgz*)
+* [ ] Angular 15: integracja *module-based* (ApmModule + ApmService + ApmErrorHandler) *lub* *standalone* (importProvidersFrom(ApmModule))
+* [ ] APM Server: *rum.enabled: true*, poprawne *allow_origins* (+ ewentualne *allow_headers*), limity/anonymous
+* [ ] Skonfigurowano *serviceName, serverUrl, environment, distributedTracingOrigins*
+* [ ] (Opcjonalnie) włączone *source maps* i dostarczone do APM
+* [ ] Dane widoczne w *APM (Services/Traces/Errors)* / *Discover*

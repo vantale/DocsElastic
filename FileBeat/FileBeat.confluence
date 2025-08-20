@@ -1,0 +1,135 @@
+﻿h1. Filebeat — Karta komponentu (podstawowa)
+_Ostatnia aktualizacja: 2025-08-20_
+
+{toc:maxLevel=2|type=list|outline=true}
+
+h2. 1) Cel komponentu (po co)
+Lekki shipper logów z plików (aplikacje, IIS, niestandardowe logi). Wysyła zdarzenia do Elasticsearch. Podgląd w *Kibana → Logs (Log Explorer/Discover)*.
+
+h2. 2) Możliwości (na start)
+* Zbieranie logów z plików tekstowych/rotowanych (filestream).
+* Obsługa wielowierszowych wpisów (stack traces).
+* Moduły gotowe dla usług (np. *iis*).
+* Publikacja do strumieni *logs-** (datasety np. *iis.access*, *iis.error*, *custom*).
+
+h2. 3) Wymagania minimalne (aby w ogóle się komunikował)
+* *Elasticsearch endpoint:* https://<ES_HOST>:<PORT> (wyjście z serwera dostępne).
+* *Uwierzytelnienie:* username+password *lub* api_key (id:secret) z prawem zapisu do *logs-*.
+* *TLS:* zaufana CA *lub* *verification_mode: certificate* z plikiem CA.
+* *Uprawnienia Windows:* Administrator do instalacji usługi; odczyt katalogów z logami.
+* (Opcjonalnie) *Kibana endpoint* (setup/dashboardy), niewymagane do samej wysyłki danych.
+
+h2. 4) Instalacja offline (Windows, ZIP)
+*Ścieżka bazowa:* C:\Elastic\filebeat\
+
+# Skopiuj i rozpakuj ZIP do *C:\Elastic\filebeat\*.
+# (Opcjonalnie) Keystore na sekrety:
+{code:language=powershell|title=Keystore (opcjonalnie)}
+cd C:\Elastic\filebeat
+.\filebeat.exe keystore create
+.\filebeat.exe keystore add ES_PASSWORD
+# lub:
+.\filebeat.exe keystore add ES_API_KEY
+{code}
+# Skonfiguruj *C:\Elastic\filebeat\filebeat.yml* (sekcja 5).
+# Testy wstępne:
+{code:language=powershell|title=Pre-flight tests}
+.\filebeat.exe test config -c .\filebeat.yml -e
+.\filebeat.exe test output -e
+{code}
+# Instalacja jako usługa:
+{code:language=powershell|title=Instalacja usługi}
+.\install-service-filebeat.ps1
+Set-Service -Name filebeat -StartupType Automatic
+Start-Service filebeat
+Get-Service filebeat
+{code}
+# (Opcjonalnie) jednorazowe *setup* pipeline’ów/dashboardów:
+{code:language=powershell|title=Setup (opcjonalnie)}
+.\filebeat.exe setup -e
+{code}
+
+*Deinstalacja (opcjonalnie):*
+{code:language=powershell|title=Deinstalacja}
+Stop-Service filebeat
+.\uninstall-service-filebeat.ps1
+{code}
+
+h2. 5) Konfiguracja minimalna (YAML)
+
+h3. 5.1 Wejścia — filestream (logi aplikacji)
+{code:language=yaml|title=filebeat.yml — filestream}
+filebeat.inputs:
+  - type: filestream
+    id: applogs
+    enabled: true
+    paths:
+      - "C:/Logs/*.log"
+    ignore_older: 72h
+    scan_frequency: 10s
+    # (opcjonalnie) wielowierszowe stack trace (przykład dla .NET):
+    # parsers:
+    #   - multiline:
+    #       type: pattern
+    #       pattern: '^\d{4}-\d{2}-\d{2}T'
+    #       negate: true
+    #       match: after
+{code}
+
+h3. 5.2 Moduł IIS (jeśli używasz IIS)
+{code:language=yaml|title=filebeat.yml — moduł iis}
+filebeat.modules:
+  - module: iis
+    access:
+      enabled: true
+      var.paths: ["C:/inetpub/logs/LogFiles/W3SVC*/u_ex*.log"]
+    error:
+      enabled: true
+      var.paths: ["C:/inetpub/logs/LogFiles/W3SVC*/u_ex*.error.log"]
+{code}
+
+h3. 5.3 Wyjście do Elasticsearch (wybierz *JEDNO*)
+{code:language=yaml|title=Elasticsearch output — user/pass}
+output.elasticsearch:
+  hosts: ["https://<ES_HOST>:<PORT>"]
+  username: "<ES_USER>"
+  password: "${ES_PASSWORD}"
+{code}
+{code:language=yaml|title=Elasticsearch output — API key}
+output.elasticsearch:
+  hosts: ["https://<ES_HOST>:<PORT>"]
+  api_key: "${ES_API_KEY}"
+{code}
+
+h3. 5.4 TLS
+{code:language=yaml|title=TLS}
+ssl:
+  verification_mode: "certificate"
+  # certificate_authorities: ["C:/Elastic/certs/ca.crt"]
+{code}
+
+h2. 6) Uruchomienie — smoke test
+# .\filebeat.exe test config -c .\filebeat.yml -e → *OK*
+# .\filebeat.exe test output -e → *OK*
+# Usługa *Running*; w Discover pojawiają się zdarzenia.
+
+h2. 7) Gdzie w Kibanie widać rezultaty
+* *Observability → Logs* (Log Explorer).
+* *Discover* (KQL przykłady):
+** agent.type : "filebeat"
+** event.module : "iis"
+** data_stream.dataset : "iis.access"
+
+h2. 8) Najczęstsze problemy (krótko)
+* *Brak odczytu plików* — uprawnienia NTFS/antywirus blokuje dostęp.
+* *Wielowierszowe logi* — brak konfiguracji *multiline* → „poszatkowane” zdarzenia.
+* *Brak danych* — zły *ES_HOST*, firewall, usługa nie działa.
+* *TLS* — niezaufana CA → dodaj *certificate_authorities* lub zainstaluj CA w Windows.
+
+h2. Aneks — Krótka checklista
+* [ ] ZIP: *C:\Elastic\filebeat\*
+* [ ] *filebeat.yml* uzupełniony (inputs/moduły, ES, TLS)
+* [ ] (Opcj.) sekrety w keystore
+* [ ] *test config/output* → *OK*
+* [ ] Usługa *Running*
+* [ ] Dane w *Logs/Discover*

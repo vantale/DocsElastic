@@ -1,0 +1,128 @@
+﻿h1. Packetbeat — Karta komponentu (podstawowa)
+_Ostatnia aktualizacja: 2025-08-20_
+
+{toc:maxLevel=2|type=list|outline=true}
+
+h2. 1) Cel komponentu (po co)
+Agent do monitorowania *ruchu sieciowego* (warstwa aplikacyjna/protokolarna) — metryki i zdarzenia dla *DNS, HTTP, TLS, flows* itp. Dane trafiają do Elasticsearch. Podgląd w *Discover*, a także (jeśli włączone) w sekcjach *Security → Network* lub na dedykowanych dashboardach.
+
+h2. 2) Możliwości (na start)
+* Analiza protokołów: *DNS, HTTP* (plain), *TLS* (metadane), przepływy (*flows*).
+* Widok najczęstszych hostów/endpointów, latencje, kody odpowiedzi.
+* Publikacja do strumieni *logs-** (datasety np. *dns*, *http*, *flow*, *tls*).
+
+h2. 3) Wymagania minimalne (aby w ogóle się komunikował)
+* *Elasticsearch endpoint:* https://<ES_HOST>:<PORT>.
+* *Uwierzytelnienie:* username+password *lub* api_key (id:secret) z prawem zapisu do *logs-*.
+* *TLS:* zaufana CA *lub* *verification_mode: certificate*.
+* *Uprawnienia Windows:* Administrator do instalacji usługi.
+* *Driver do przechwytywania pakietów:* *Npcap* (w trybie WinPcap API–compatible). Zainstaluj offline przed startem Packetbeat.
+* (Uwaga) *HTTPS/HTTP2* są szyfrowane — bez deszyfracji zobaczysz tylko metadane *TLS*, nie treść HTTP.
+
+h2. 4) Instalacja offline (Windows, ZIP)
+*Ścieżka bazowa:* C:\Elastic\packetbeat\
+
+# Zainstaluj *Npcap* (offline) w trybie kompatybilnym z WinPcap.
+# Skopiuj i rozpakuj ZIP do *C:\Elastic\packetbeat\*.
+# (Opcjonalnie) Keystore na sekrety:
+{code:language=powershell|title=Keystore (opcjonalnie)}
+cd C:\Elastic\packetbeat
+.\packetbeat.exe keystore create
+.\packetbeat.exe keystore add ES_PASSWORD
+# lub:
+.\packetbeat.exe keystore add ES_API_KEY
+{code}
+# Skonfiguruj *C:\Elastic\packetbeat\packetbeat.yml* (sekcja 5).
+# Testy wstępne:
+{code:language=powershell|title=Pre-flight tests}
+.\packetbeat.exe test config -c .\packetbeat.yml -e
+.\packetbeat.exe test output -e
+{code}
+# Instalacja jako usługa:
+{code:language=powershell|title=Instalacja usługi}
+.\install-service-packetbeat.ps1
+Set-Service -Name packetbeat -StartupType Automatic
+Start-Service packetbeat
+Get-Service packetbeat
+{code}
+
+*Deinstalacja (opcjonalnie):*
+{code:language=powershell|title=Deinstalacja}
+Stop-Service packetbeat
+.\uninstall-service-packetbeat.ps1
+{code}
+
+h2. 5) Konfiguracja minimalna (YAML)
+
+h3. 5.1 Interfejs i przepływy
+{code:language=yaml|title=packetbeat.yml — interfejs/flows}
+packetbeat.interfaces.device: 0     # indeks karty sieciowej (sprawdź listę w logu startowym)
+packetbeat.flows:
+  enabled: true
+  timeout: 30s
+  period: 10s
+{code}
+
+h3. 5.2 Protokoły — DNS/HTTP/TLS (przykład)
+{code:language=yaml|title=packetbeat.yml — protokoły}
+packetbeat.protocols:
+  - type: dns
+    ports: [53]
+    include_authorities: true
+    include_additionals: true
+
+  - type: http
+    ports: [80, 8080, 8000, 5000]
+    # Uwaga: HTTPS nie będzie dekodowany jako HTTP
+
+  - type: tls
+    ports: [443, 8443]
+{code}
+
+h3. 5.3 Wyjście do Elasticsearch (wybierz *JEDNO*)
+{code:language=yaml|title=Elasticsearch output — user/pass}
+output.elasticsearch:
+  hosts: ["https://<ES_HOST>:<PORT>"]
+  username: "<ES_USER>"
+  password: "${ES_PASSWORD}"
+{code}
+{code:language=yaml|title=Elasticsearch output — API key}
+output.elasticsearch:
+  hosts: ["https://<ES_HOST>:<PORT>"]
+  api_key: "${ES_API_KEY}"
+{code}
+
+h3. 5.4 TLS
+{code:language=yaml|title=TLS}
+ssl:
+  verification_mode: "certificate"
+  # certificate_authorities: ["C:/Elastic/certs/ca.crt"]
+{code}
+
+h2. 6) Uruchomienie — smoke test
+# .\packetbeat.exe test config/output → *OK*
+# Usługa *Running*; generuj ruch (DNS/HTTP) i sprawdź w Discover.
+
+h2. 7) Gdzie w Kibanie widać rezultaty
+* *Discover* (oraz *Security → Network*, jeśli funkcja włączona).
+* (Opcjonalnie) dashboardy Packetbeat po *packetbeat setup*.
+* *KQL przykłady:*
+** agent.type : "packetbeat"
+** event.dataset : "dns" OR "flow" OR "http" OR "tls"
+** network.protocol : "dns" OR "http" OR "tls"
+
+h2. 8) Najczęstsze problemy (krótko)
+* *Brak Npcap* — Packetbeat nie widzi interfejsów → zainstaluj Npcap (WinPcap API).
+* *Zły interfejs* — ustaw właściwy *device* (0/1/2…), sprawdź log startowy.
+* *Brak HTTP przy HTTPS* — szyfrowanie, widoczne tylko metadane *TLS*.
+* *Brak danych* — zły *ES_HOST*, firewall, usługa nie działa.
+* *TLS* — brak zaufania do CA → dodaj *certificate_authorities* lub zainstaluj CA.
+
+h2. Aneks — Krótka checklista
+* [ ] Npcap zainstalowany (WinPcap API–compatible)
+* [ ] ZIP: *C:\Elastic\packetbeat\*
+* [ ] *packetbeat.yml* uzupełniony (interfejs, protokoły, ES, TLS)
+* [ ] (Opcj.) sekrety w keystore
+* [ ] *test config/output* → *OK*
+* [ ] Usługa *Running*
+* [ ] Dane w *Discover* (DNS/flows/HTTP/TLS)

@@ -1,0 +1,149 @@
+﻿h1. Heartbeat — Karta komponentu (podstawowa)
+_Ostatnia aktualizacja: 2025-08-20_
+
+{toc:maxLevel=2|type=list|outline=true}
+
+h2. 1) Cel komponentu (po co)
+Lekki agent do monitorowania *dostępności i czasu odpowiedzi* usług (HTTP/HTTPS, ICMP/ping, TCP). Wysyła pomiary do Elasticsearch, a w Kibanie prezentuje status i opóźnienia w *Kibana → Uptime*.
+
+h2. 2) Możliwości (na start)
+* Monitoruje *HTTP/HTTPS*, *ICMP (ping)* oraz *TCP* wg harmonogramu.
+* Rejestruje status (up/down), *RTT/latency*, kody HTTP i podstawowe czasy.
+* Publikuje do strumieni danych *heartbeat-* (widoczne w Uptime i Discover).
+
+h2. 3) Wymagania minimalne (aby w ogóle się komunikował)
+* *Elasticsearch endpoint:* https://<ES_HOST>:<PORT> (wyjście z serwera dostępne).
+* *Uwierzytelnienie:* username+password *lub* *api_key (id:secret)* z prawem zapisu do *heartbeat-*.
+* *TLS:* CA zaufana przez Windows *lub* *verification_mode: certificate* z podaniem własnej CA.
+* *Uprawnienia Windows:* powłoka jako *Administrator* (instalacja usługi i ICMP).
+* (Opcjonalnie) *Kibana endpoint* do setupu/dashboardów (nie jest wymagany do samej wysyłki danych).
+
+h2. 4) Instalacja offline (Windows, ZIP)
+*Ścieżka bazowa:* C:\Elastic\heartbeat\
+
+# Skopiuj i rozpakuj ZIP do *C:\Elastic\heartbeat\*.
+# (Opcjonalnie) Keystore na sekrety:
+{code:language=powershell|title=Keystore (opcjonalnie)}
+cd C:\Elastic\heartbeat
+.\heartbeat.exe keystore create
+.\heartbeat.exe keystore add ES_PASSWORD
+# lub:
+.\heartbeat.exe keystore add ES_API_KEY
+{code}
+# Skonfiguruj *C:\Elastic\heartbeat\heartbeat.yml* (patrz sekcja 5).
+# Testy wstępne:
+{code:language=powershell|title=Pre-flight tests}
+.\heartbeat.exe test config -c .\heartbeat.yml -e
+.\heartbeat.exe test output -e
+{code}
+# Instalacja jako usługa Windows (Admin):
+{code:language=powershell|title=Instalacja usługi}
+.\install-service-heartbeat.ps1
+Set-Service -Name heartbeat -StartupType Automatic
+Start-Service heartbeat
+Get-Service heartbeat
+{code}
+# Weryfikacja: dane powinny pojawić się w Kibanie po 1–2 minutach (sekcja 7).
+
+*Deinstalacja (opcjonalnie):*
+{code:language=powershell|title=Deinstalacja}
+Stop-Service heartbeat
+.\uninstall-service-heartbeat.ps1
+{code}
+
+h2. 5) Konfiguracja minimalna (YAML)
+
+h3. 5.1 Monitory (przykład HTTP)
+{code:language=yaml|title=heartbeat.yml — monitor HTTP}
+heartbeat.monitors:
+  - type: http
+    id: onet-http
+    name: "Onet HTTP"
+    schedule: "@every 30s"
+    urls: ["http://onet.pl"]
+    check.request:
+      method: "GET"
+    check.response:
+      status: 200
+{code}
+
+h3. 5.2 Wyjście do Elasticsearch (wybierz *JEDNO*)
+
+*Wariant A — username/password (możesz użyć keystore):*
+{code:language=yaml|title=Elasticsearch output — user/pass}
+output.elasticsearch:
+  hosts: ["https://<ES_HOST>:<PORT>"]
+  username: "<ES_USER>"
+  password: "${ES_PASSWORD}"   # przechowywane w keystore
+{code}
+
+*Wariant B — API key:*
+{code:language=yaml|title=Elasticsearch output — API key}
+output.elasticsearch:
+  hosts: ["https://<ES_HOST>:<PORT>"]
+  api_key: "${ES_API_KEY}"     # id:secret; może być w keystore
+{code}
+
+h3. 5.3 TLS (zaufanie do CA)
+{code:language=yaml|title=TLS}
+ssl:
+  verification_mode: "certificate"
+  # Jeśli używacie własnej CA, wskaż ścieżkę:
+  # certificate_authorities: ["C:/Elastic/certs/ca.crt"]
+{code}
+
+h3. 5.4 (Opcjonalnie) Kibana do setupu/dashboardów
+{code:language=yaml|title=Kibana (opcjonalnie)}
+setup.kibana:
+  host: "https://<KIBANA_HOST>:<PORT>"
+  # username: "<KB_USER>"
+  # password: "<KB_PASSWORD>"
+{code}
+
+h3. 5.5 Dodatkowe przykłady monitorów
+
+*ICMP (ping) — wymaga uruchomienia jako Administrator*
+{code:language=yaml|title=monitor ICMP (opcjonalnie)}
+- type: icmp
+  id: ping-gateway
+  name: "Ping Gateway"
+  schedule: "@every 30s"
+  hosts: ["192.168.0.1"]
+{code}
+
+*TCP (sprawdzenie portu)*
+{code:language=yaml|title=monitor TCP (opcjonalnie)}
+- type: tcp
+  id: tcp-https
+  name: "TCP 443 check"
+  schedule: "@every 30s"
+  hosts: ["my.api.local:443"]
+{code}
+
+h2. 6) Uruchomienie — smoke test
+# .\heartbeat.exe test config -c .\heartbeat.yml -e → *OK*
+# .\heartbeat.exe test output -e → *OK*
+# Uruchom usługę i potwierdź stan *Running*.
+# Sprawdź utworzenie strumienia *heartbeat-* (sekcja 7).
+
+h2. 7) Gdzie w Kibanie widać rezultaty
+* *Observability → Uptime*: lista monitorów, statusy, historia, opóźnienia.
+* *Discover* (przykłady KQL):
+** data_stream.dataset : "heartbeat"
+** monitor.name : "Onet HTTP"
+** monitor.type : "http"
+** summary.up : false  (tylko nieudane próby)
+
+h2. 8) Najczęstsze problemy (krótko)
+* *401/403* — nieprawidłowe dane lub API key bez prawa zapisu do *heartbeat-*.
+* *Błędy TLS* — brak zaufania do CA: dodaj *certificate_authorities* lub zaimportuj CA do Windows.
+* *Brak danych w Kibanie* — zły *ES_HOST*, blokada firewalla na wyjściu, usługa nie działa.
+* *ICMP nie działa* — brak uruchomienia z uprawnieniami Administratora.
+
+h2. Aneks — Krótka checklista instalacji
+* [ ] ZIP rozpakowany do *C:\Elastic\heartbeat\*
+* [ ] Uzupełniony *heartbeat.yml* (ES host, auth, TLS, monitory)
+* [ ] (Opcjonalnie) sekrety dodane do keystore
+* [ ] *test config* i *test output* dają *OK*
+* [ ] Usługa zainstalowana i *Running*
+* [ ] Dane widoczne w *Uptime* / *Discover*

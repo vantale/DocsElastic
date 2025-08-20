@@ -1,0 +1,141 @@
+﻿h1. APM .NET — Karta komponentu (podstawowa)
+_Ostatnia aktualizacja: 2025-08-20_
+
+{toc:maxLevel=2|type=list|outline=true}
+
+h2. 1) Cel komponentu (po co)
+Agent APM dla aplikacji *.NET* służący do zbierania *transakcji, śladów (traces), błędów i metryk aplikacyjnych* bezpośrednio z kodu. Dane trafiają do APM Server (lub integracji APM w Elastic Agent), a w Kibanie są widoczne w *Kibana → APM (Services, Traces, Errors, Dependencies)*.
+
+h2. 2) Możliwości (na start)
+* Automatyczne śledzenie żądań HTTP/ASP.NET Core, zależności (SQL, HTTP out, Redis itp.) i wyjątków.
+* Ręczne *span/transaction* przez API agenta w miejscach krytycznych (np. sekcje CPU-heavy).
+* Metryki aplikacyjne: zużycie CPU/Pamięci procesu, GC, wątki.
+* Publikacja do indeksów/strumieni: *traces-**, logs-apm-**, metrics-apm-** (zarządzane przez integrację).*
+
+h2. 3) Wymagania minimalne (aby w ogóle się komunikował)
+* *APM Server URL:* https://<APM_HOST>:8200  (albo adres integracji APM wystawionej przez Elastic Agent).
+* *Uwierzytelnienie:* *secret token* *lub* *API key* z prawem przyjmowania zdarzeń APM.
+* *TLS:* certyfikat serwera zaufany przez Windows *lub* wskazanie własnej CA / wyłączenie weryfikacji certu (na testach).
+* *Service name & environment:* unikalna nazwa usługi (*service.name*) i środowisko (*environment*).
+* (Opcjonalnie) Uprawnienia do odczytu liczników/źródeł metryk w środowisku uruchomieniowym.
+
+h2. 4) Instalacja offline (Windows) — dwie ścieżki
+
+*Wariant A — integracja w kodzie (NuGet offline, zalecany):*
+# Przygotuj *lokalny feed NuGet* z paczkami (*.nupkg*) wymaganymi przez projekt (np. *Elastic.Apm.AspNetCore*, opcjonalnie *Elastic.Apm.SqlClient*, *Elastic.Apm.EntityFrameworkCore*).
+# Na maszynie build/serwerze *dodaj źródło* do lokalnego feedu.
+{code:language=powershell|title=Konfiguracja lokalnego źródła NuGet}
+dotnet nuget add source C:\offline\nuget -n LocalFeed
+# lub nuget.exe: nuget sources Add -Name LocalFeed -Source C:\offline\nuget
+{code}
+# W projekcie dodaj paczki z lokalnego źródła.
+{code:language=powershell|title=Dodanie paczek}
+dotnet add package Elastic.Apm.AspNetCore --version <x.y.z> --source LocalFeed
+dotnet add package Elastic.Apm.SqlClient --version <x.y.z> --source LocalFeed   # opcjonalnie
+dotnet add package Elastic.Apm.EntityFrameworkCore --version <x.y.z> --source LocalFeed   # opcjonalnie
+{code}
+# Dodaj wywołanie agenta w kodzie aplikacji (ASP.NET Core).
+{code:language=csharp|title=Program.cs / Startup.cs (ASP.NET Core)}
+using Elastic.Apm.NetCoreAll; // alternatywnie: Elastic.Apm.AspNetCore
+// ...
+var builder = WebApplication.CreateBuilder(args);
+// Konfiguracja z appsettings.* i/lub zmiennych środowiskowych
+var app = builder.Build();
+// Minimalny start agenta:
+app.UseAllElasticApm(builder.Configuration); // jeśli używasz Elastic.Apm.NetCoreAll
+// lub:
+// app.UseElasticApm(builder.Configuration);  // jeśli używasz Elastic.Apm.AspNetCore
+app.Run();
+{code}
+# Skonfiguruj *appsettings.json* lub zmienne środowiskowe (sekcja 5) i zbuduj/uruchom aplikację.
+
+*Wariant B — auto-instrumentacja (profiler, bez zmian w kodzie):*
+# Skopiuj ZIP *apm-agent-dotnet* na serwer (offline) i rozpakuj, np. do *C:\Elastic\apm-dotnet\*.
+# Ustaw zmienne środowiskowe dla profilu CLR (w *System Properties → Environment Variables* lub skryptem). *Wymaga restartu procesu/apki/usługi.*
+{code:language=powershell|title=Zmienne środowiskowe — profiler .NET}
+setx ELASTIC_APM_SERVER_URLS "https://<APM_HOST>:8200"
+setx ELASTIC_APM_SECRET_TOKEN "<SECRET>"   # albo: setx ELASTIC_APM_API_KEY "<ID:SECRET>"
+setx ELASTIC_APM_SERVICE_NAME "orders-api"
+setx ELASTIC_APM_ENVIRONMENT "prod"
+setx ELASTIC_APM_VERIFY_SERVER_CERT "true"
+
+# Kluczowe dla profilu:
+setx CORECLR_ENABLE_PROFILING "1"
+setx CORECLR_PROFILER "{FA65FE15-...-GUID-AGENTA...}"        # GUID dostarczany z agentem
+setx CORECLR_PROFILER_PATH "C:\Elastic\apm-dotnet\elastic_apm_profiler.dll"
+{code}
+# Uruchom ponownie usługę/aplikację hostowaną przez .NET (IIS/Kestrel/Windows Service).
+# Zweryfikuj, że pojawiają się transakcje w Kibanie (sekcja 7).
+
+h2. 5) Konfiguracja minimalna
+
+h3. 5.1 Zmienne środowiskowe (działają w obu wariantach)
+{code:language=none|title=Env vars — minimal}
+ELASTIC_APM_SERVER_URLS=https://<APM_HOST>:8200
+ELASTIC_APM_SECRET_TOKEN=<SECRET>          # albo: ELASTIC_APM_API_KEY=<ID:SECRET>
+ELASTIC_APM_SERVICE_NAME=orders-api
+ELASTIC_APM_ENVIRONMENT=prod
+ELASTIC_APM_VERIFY_SERVER_CERT=true        # false tylko na testach
+# (opcjonalnie)
+ELASTIC_APM_LOG_LEVEL=Information          # Debug na potrzeby diagnostyki
+ELASTIC_APM_GLOBAL_LABELS=team=backend,owner=infra
+{code}
+
+h3. 5.2 appsettings.json (alternatywa/uzupełnienie)
+{code:language=json|title=appsettings.json (fragment)}
+{
+  "ElasticApm": {
+    "ServerUrls": "https://<APM_HOST>:8200",
+    "SecretToken": "<SECRET>",  // lub zamiast tego: "ApiKey": "<ID:SECRET>"
+    "ServiceName": "orders-api",
+    "Environment": "prod",
+    "VerifyServerCert": true,
+    "GlobalLabels": "team=backend,owner=infra"
+  }
+}
+{code}
+
+h3. 5.3 Ręczne span/transaction (opcjonalnie)
+{code:language=csharp|title=Przykład ręcznego spanu}
+using Elastic.Apm;
+
+public async Task DoWorkAsync()
+{
+    await Agent.Tracer.CaptureTransaction("heavy-work", "custom", async (t) =>
+    {
+        await t.CaptureSpan("cpu-phase", "calc", async (s) =>
+        {
+            // ... kod krytyczny ...
+            await Task.Delay(50);
+        });
+    });
+}
+{code}
+
+h2. 6) Uruchomienie — smoke test
+# Uruchom aplikację i wywołaj dowolny endpoint (np. */health*, */api/orders*).
+# W logu agenta ustaw *ELASTIC_APM_LOG_LEVEL=Debug* na czas testu (opcjonalnie).
+# Sprawdź, czy tworzą się dokumenty w *traces-** / metrics-apm-** / logs-apm-***.
+
+h2. 7) Gdzie w Kibanie widać rezultaty
+* *APM → Services*: lista usług, *Latency/Throughput/Failed transaction rate*, *Errors*, *Dependencies*, *Service map*.
+* *APM → Traces*: przegląd śladów i „najcięższych” transakcji.
+* *Discover* (przykłady KQL):
+** processor.event : "transaction"
+** processor.event : "span"
+** service.name : "orders-api"
+** event.outcome : "failure"
+
+h2. 8) Najczęstsze problemy (krótko)
+* *401/403* — nieprawidłowy *secret token* / *API key* lub brak uprawnień APM do przyjmowania zdarzeń.
+* *TLS/Cert* — niezaufana CA APM Server: wskaż *CA* lub ustaw *VerifyServerCert=false* (tylko testy).
+* *Brak danych* — zły *APM_HOST*, blokada firewall (port 8200/HTTPS), błędna ścieżka profilu CLR (wariant B), brak wywołań endpointów.
+* *Duplikaty usług* — różne *service.name* między instancjami/środowiskami; ujednolić nazewnictwo.
+* *Brak zależności SQL/EF* — dołóż pakiety *Elastic.Apm.SqlClient* / *Elastic.Apm.EntityFrameworkCore* lub włącz auto-instrumentację.
+
+h2. Aneks — Krótka checklista
+* [ ] Wybrany wariant: *A (NuGet w kodzie)* / *B (profiler bez zmian w kodzie)*
+* [ ] Skonfigurowano *ServerUrls + SecretToken/API Key + ServiceName + Environment*
+* [ ] (TLS) Cert CA zaufany *lub* skonfigurowany w agencie
+* [ ] Uruchomiono aplikację, wykonano testowe żądania
+* [ ] Dane widoczne w *APM (Services/Traces/Errors/Dependencies)* / *Discover*

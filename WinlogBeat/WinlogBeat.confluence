@@ -1,0 +1,116 @@
+﻿h1. Winlogbeat — Karta komponentu (podstawowa)
+_Ostatnia aktualizacja: 2025-08-20_
+
+{toc:maxLevel=2|type=list|outline=true}
+
+h2. 1) Cel komponentu (po co)
+Agent do zbierania *Windows Event Logs* (Application, System, Security, inne kanały). Wysyła zdarzenia do Elasticsearch. Podgląd w *Kibana → Logs* oraz (opcjonalnie) w częściach Security.
+
+h2. 2) Możliwości (na start)
+* Odczyt kanałów *Application/System/Security*.
+* Obsługa kanałów aplikacyjnych (np. *Microsoft-*), Sysmon (jeśli zainstalowany).
+* Publikacja do strumieni *logs-** (datasety np. *windows.eventlog*, *sysmon*).
+
+h2. 3) Wymagania minimalne (aby w ogóle się komunikował)
+* *Elasticsearch endpoint:* https://<ES_HOST>:<PORT>.
+* *Uwierzytelnienie:* username+password *lub* api_key (id:secret) z prawem zapisu do *logs-*.
+* *TLS:* zaufana CA *lub* *verification_mode: certificate*.
+* *Uprawnienia Windows:* Administrator (instalacja usługi). Do kanału *Security* zalecany kontekst *LocalSystem* (domyślnie usługa).
+* (Opcjonalnie) *Kibana endpoint* (setup/dashboardy).
+
+h2. 4) Instalacja offline (Windows, ZIP)
+*Ścieżka bazowa:* C:\Elastic\winlogbeat\
+
+# Skopiuj i rozpakuj ZIP do *C:\Elastic\winlogbeat\*.
+# (Opcjonalnie) Keystore na sekrety:
+{code:language=powershell|title=Keystore (opcjonalnie)}
+cd C:\Elastic\winlogbeat
+.\winlogbeat.exe keystore create
+.\winlogbeat.exe keystore add ES_PASSWORD
+# lub:
+.\winlogbeat.exe keystore add ES_API_KEY
+{code}
+# Skonfiguruj *C:\Elastic\winlogbeat\winlogbeat.yml* (sekcja 5).
+# Testy wstępne:
+{code:language=powershell|title=Pre-flight tests}
+.\winlogbeat.exe test config -c .\winlogbeat.yml -e
+.\winlogbeat.exe test output -e
+{code}
+# Instalacja jako usługa:
+{code:language=powershell|title=Instalacja usługi}
+.\install-service-winlogbeat.ps1
+Set-Service -Name winlogbeat -StartupType Automatic
+Start-Service winlogbeat
+Get-Service winlogbeat
+{code}
+# (Opcjonalnie) jednorazowe *setup*:
+{code:language=powershell|title=Setup (opcjonalnie)}
+.\winlogbeat.exe setup -e
+{code}
+
+*Deinstalacja (opcjonalnie):*
+{code:language=powershell|title=Deinstalacja}
+Stop-Service winlogbeat
+.\uninstall-service-winlogbeat.ps1
+{code}
+
+h2. 5) Konfiguracja minimalna (YAML)
+
+h3. 5.1 Kanały dzienników zdarzeń
+{code:language=yaml|title=winlogbeat.yml — event_logs}
+winlogbeat.event_logs:
+  - name: Application
+    ignore_older: 72h
+  - name: System
+    ignore_older: 72h
+  - name: Security
+    ignore_older: 72h
+    # (opcjonalnie) poziomy: level: warning, error, critical
+  # (opcjonalnie) dodatkowy kanał aplikacyjny:
+  # - name: Microsoft-Windows-Windows Defender/Operational
+{code}
+
+h3. 5.2 Wyjście do Elasticsearch (wybierz *JEDNO*)
+{code:language=yaml|title=Elasticsearch output — user/pass}
+output.elasticsearch:
+  hosts: ["https://<ES_HOST>:<PORT>"]
+  username: "<ES_USER>"
+  password: "${ES_PASSWORD}"
+{code}
+{code:language=yaml|title=Elasticsearch output — API key}
+output.elasticsearch:
+  hosts: ["https://<ES_HOST>:<PORT>"]
+  api_key: "${ES_API_KEY}"
+{code}
+
+h3. 5.3 TLS
+{code:language=yaml|title=TLS}
+ssl:
+  verification_mode: "certificate"
+  # certificate_authorities: ["C:/Elastic/certs/ca.crt"]
+{code}
+
+h2. 6) Uruchomienie — smoke test
+# .\winlogbeat.exe test config/output → *OK*
+# Usługa *Running*; w Discover pojawiają się zdarzenia z kanałów.
+
+h2. 7) Gdzie w Kibanie widać rezultaty
+* *Observability → Logs* (Log Explorer).
+* *Discover* (KQL przykłady):
+** agent.type : "winlogbeat"
+** winlog.channel : "Security"
+** event.code : 4624 OR 4625
+
+h2. 8) Najczęstsze problemy (krótko)
+* *Brak kanału* — nazwa kanału niepoprawna; sprawdź *Event Viewer → Applications and Services Logs*.
+* *Brak Security* — uruchomienie usługi w innym niż *LocalSystem* lub brak uprawnień.
+* *Brak danych* — zły *ES_HOST*, firewall, usługa nie działa.
+* *TLS* — brak zaufania do CA → dodaj *certificate_authorities* lub zainstaluj CA w Windows.
+
+h2. Aneks — Krótka checklista
+* [ ] ZIP: *C:\Elastic\winlogbeat\*
+* [ ] *winlogbeat.yml* uzupełniony (kanały, ES, TLS)
+* [ ] (Opcj.) sekrety w keystore
+* [ ] *test config/output* → *OK*
+* [ ] Usługa *Running*
+* [ ] Dane w *Logs/Discover*
