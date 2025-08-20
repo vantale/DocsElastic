@@ -1,0 +1,25 @@
+﻿1) „Setup” z beata (najprościej)
+
+Wymagane tylko połączenie do Twojej Kibany/Elastica (internet niepotrzebny).
+Na maszynie z beatem uruchom:
+
+Filebeat
+
+filebeat.exe setup --dashboards ^
+  -E setup.kibana.host=https://<kibana:port> ^
+  -E setup.kibana.username=<user> ^
+  -E setup.kibana.password=<pass> ^
+  -E output.elasticsearch.hosts=["https://<es:9200>"] ^
+  -E output.elasticsearch.username=<user> ^
+  -E output.elasticsearch.password=<pass>
+
+
+Winlogbeat
+
+winlogbeat.exe setup --dashboards ^
+  -E setup.kibana.host=https://<kibana:port> ^
+  -E setup.kibana.username=<user> ^
+  -E setup.kibana.password=<pass> ^
+  -E output.elasticsearch.hosts=["https://<es:9200>"] ^
+  -E output.elasticsearch.username=<user> ^
+  -E output.elasticsearch.password=<pass>
