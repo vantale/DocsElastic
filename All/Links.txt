@@ -1,0 +1,21 @@
+﻿Filebeat
+https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-9.1.2-windows-x86_64.zip 
+Elastic
+
+Metricbeat
+https://artifacts.elastic.co/downloads/beats/metricbeat/metricbeat-9.1.2-windows-x86_64.zip 
+
+
+Winlogbeat
+https://artifacts.elastic.co/downloads/beats/winlogbeat/winlogbeat-9.1.2-windows-x86_64.zip 
+
+
+Packetbeat
+https://artifacts.elastic.co/downloads/beats/packetbeat/packetbeat-9.1.2-windows-x86_64.zip 
+
+
+Heartbeat
+https://artifacts.elastic.co/downloads/beats/heartbeat/heartbeat-9.1.2-windows-x86_64.zip 
+
+
+Dodatkowo do weryfikacji sum możesz dopisać .sha512 na końcu każdego URL (np. …windows-x86_64.zip.sha512). 
