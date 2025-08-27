@@ -1,0 +1,27 @@
+Co to daje (w skrócie)
+
+Brak cookies (disableCookies) → brak trwałych ID.
+
+Brak fingerprintingu (disableBrowserFeatureDetection) → redukcja „profilu” urządzenia.
+
+Brak referrera (setReferrerUrl, '') → nie przenosisz przypadkowych PII z poprzedniej strony.
+
+Sanityzacja URL strony (tylko ścieżka) → żadne ?email=... itp. nie trafi do Matomo.
+
+Twardy filtr requestów (fetch/XHR/beacon/IMG) → usuwa uid, dimension*, typowe PII w query/body.
+
+Zero heatmap/session/media/form/link tracking → żadnych „bogatych” danych behawioralnych.
+
+Tylko metryki wydajności jako proste eventy: TTFB, FCP, LCP, CLS (bez identyfikatora użytkownika)
+
+=================================================================================
+
+ładuje Matomo (bez cookies, bez fingerprintingu, bez UserID),
+
+sanityzuje każdy request do matomo.php (usuwa uid, dimension*, ewentualne PII w query),
+
+nie używa heatmap/session recording, media/form/link tracking,
+
+śledzi tylko minimalne metryki wydajności (TTFB, FCP, LCP, CLS) jako anonimowe eventy,
+
+działa bez bannera zgody (zgodnie z założeniem: minimalny zakres, bez profilowania).
