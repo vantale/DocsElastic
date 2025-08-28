@@ -1,45 +1,60 @@
 import { Injectable } from '@angular/core';
 import { environment } from '../../environments/environment';
 
+declare global {
+    interface Window {
+        _paq: any[];
+    }
+}
+
 @Injectable({ providedIn: 'root' })
 export class MatomoLoaderService {
-  private loaded = false;
+    private loaded = false;
 
-  async init(): Promise<void> {
-    if (!environment.MATOMO_ENABLED || this.loaded) return;
+    async init(): Promise<void> {
+        if (!environment.MATOMO_ENABLED || this.loaded) return;
 
-    // 1) Kolejka Matomo
-    (window as any)._paq = (window as any)._paq || [];
+        // 1) Kolejka Matomo musi istnieć przed załadowaniem matomo.js
+        window._paq = window._paq || [];
 
-    // 2) Ustawienia PRIVACY BEFORE ANYTHING:
-    // — całkowicie bez cookies
-    (window as any)._paq.push(['disableCookies']);
-    // — nie korzystaj z fingerprintingu / cech przeglądarki
-    (window as any)._paq.push(['disableBrowserFeatureDetection']);
-    // — respektuj DNT (bez profilowania, jeszcze mocniej prywatnie)
-    (window as any)._paq.push(['setDoNotTrack', true]);
-    // — nie wysyłaj referrera (aby nie przeszły PII z poprzedniej strony)
-    (window as any)._paq.push(['setReferrerUrl', '']);
+        // 2) Privacy-first BEFORE ANYTHING:
+        // — całkowicie bez cookies (dostępne w starych wersjach trackera)
+        window._paq.push(['disableCookies']);
 
-    // 3) Konfiguracja instancji
-    (window as any)._paq.push(['setTrackerUrl', `${environment.MATOMO_BASE_URL}/matomo.php`]);
-    (window as any)._paq.push(['setSiteId', environment.MATOMO_SITE_ID]);
+        // — wyłączenie "browser feature detection" tylko jeśli metoda istnieje
+        //   (Matomo >= 4.7 ma tę metodę; starsze wydania jej nie znają)
+        window._paq.push([function () {
+            const t = this as any;
+            if (typeof t.disableBrowserFeatureDetection === 'function') {
+                t.disableBrowserFeatureDetection();
+            }
+        }]);
 
-    // 4) NIE włączamy nic ponad podstawę (brak enableLinkTracking, form/media/heatmap)
+        // — respektuj Do Not Track
+        window._paq.push(['setDoNotTrack', true]);
 
-    // 5) Załaduj bibliotekę matomo.js
-    await this.loadScript(`${environment.MATOMO_BASE_URL}/matomo.js`);
-    this.loaded = true;
-  }
+        // — nie wysyłaj referrera (ogranicza ryzyko przeniesienia PII w URL)
+        window._paq.push(['setReferrerUrl', '']);
 
-  private loadScript(src: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.async = true;
-      s.src = src;
-      s.onload = () => resolve();
-      s.onerror = (e) => reject(e);
-      document.head.appendChild(s);
-    });
-  }
+        // 3) Podstawowa konfiguracja instancji
+        window._paq.push(['setTrackerUrl', `${environment.MATOMO_BASE_URL}/matomo.php`]);
+        window._paq.push(['setSiteId', environment.MATOMO_SITE_ID]);
+
+        // 4) NIE włączamy nic ponad podstawę (brak enableLinkTracking, form/media/heatmap)
+
+        // 5) Załaduj bibliotekę matomo.js
+        await this.loadScript(`${environment.MATOMO_BASE_URL}/matomo.js`);
+        this.loaded = true;
+    }
+
+    private loadScript(src: string): Promise<void> {
+        return new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.async = true;
+            s.src = src;
+            s.onload = () => resolve();
+            s.onerror = (e) => reject(e);
+            document.head.appendChild(s);
+        });
+    }
 }
