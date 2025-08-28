@@ -1,0 +1,16 @@
+﻿Krok 1 — Wyłącz ciasteczka (cookieless)
+
+Cel: brak cookies Matomo przy zachowaniu pageview.
+
+Co zmieniasz (w MatomoService.init() – PRZED setTrackerUrl/setSiteId):
+
+w._paq.push(['disableCookies']);   // ← DODAJ TO
+w._paq.push(['setTrackerUrl', this.baseUrl + 'matomo.php']);
+w._paq.push(['setSiteId', environment.matomo.siteId]);
+
+
+Weryfikacja:
+
+DevTools → Application → Cookies → brak _pk_id* i _pk_ses*.
+
+Network → matomo.php dalej 200, wizyty w Real-time widać.
