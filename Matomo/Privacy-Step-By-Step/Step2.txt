@@ -1,0 +1,15 @@
+﻿
+Krok 2 — Szanuj Do Not Track
+
+Cel: jeśli przeglądarka ma DNT=1, nie śledzimy.
+
+Dodaj zaraz po disableCookies:
+
+w._paq.push(['setDoNotTrack', true]);
+
+
+Weryfikacja:
+
+W przeglądarce włącz DNT, odśwież: żądania do matomo.php nie powinny lecieć / wizyty nie pojawiają się.
+
+Wyłącz DNT → wracają.
