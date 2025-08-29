@@ -1,15 +1,158 @@
-﻿
-Krok 4 — Wyłącz link-tracking
+﻿0) npm (jeśli nie masz jeszcze web-vitals)
+npm i web-vitals
 
-Cel: brak automatycznych hitów przy klikach (Twoja preferencja „bez link tracking”).
+1) src/environments/environment.ts (DEV)
 
-Zmień w init(): usuń/zakomentuj:
+Dodaj sekcję sampling (10% przykładowo):
 
-// w._paq.push(['enableLinkTracking']); // usuwamy
+export const environment = {
+  production: false,
+  matomo: {
+    enabled: true,
+    respectDnt: false,           // DEV: nie blokuj testów
+    url: 'https://twoj-matomo.example.com/',
+    siteId: '1',
+    sampling: {
+      vitals: 0.10,              // 10% próbkowania Web Vitals
+      spaNav: 0.10,              // 10% próbkowania SPA nav time
+    },
+  },
+};
+
+2) src/environments/environment.prod.ts (PROD)
+
+Analogicznie:
+
+export const environment = {
+  production: true,
+  matomo: {
+    enabled: true,
+    respectDnt: true,            // PROD: szanuj DNT
+    url: 'https://twoj-matomo.example.com/',
+    siteId: '1',
+    sampling: {
+      vitals: 0.10,
+      spaNav: 0.10,
+    },
+  },
+};
+
+3) src/app/services/matomo.service.ts
+3.1 Dodaj pola w klasie
+
+Wklej obok Twoich istniejących pól:
+
+private trackingAllowed = false;       // true gdy matomo.js faktycznie wstrzyknięty
+private vitalsStarted = false;         // aby nie startować dwa razy
+private sampled = { vitals: true, spaNav: true };
+private spaNavStartTs: number | null = null;
+
+3.2 Dodaj helper do próbkowania
+
+Wklej w klasie (np. pod polami):
+
+private pickSample(rate: number | undefined): boolean {
+  const r = typeof rate === 'number' ? Math.max(0, Math.min(1, rate)) : 1;
+  if (r >= 1) return true;
+  if (r <= 0) return false;
+  try {
+    const arr = new Uint32Array(1);
+    crypto.getRandomValues(arr);
+    return arr[0] / 0xFFFFFFFF < r;
+  } catch {
+    return Math.random() < r;
+  }
+}
+
+3.3 Uzupełnij init() o ustawienie samplingów
+
+Po bloku this.zone.runOutsideAngular(() => { ... }); (zaraz po nim) dodaj:
+
+this.trackingAllowed = true;
+
+// Ustal sampling po tym, jak wiemy, że tracking jest dozwolony:
+const rates = (environment.matomo as any)?.sampling || {};
+this.sampled.vitals = this.pickSample(rates.vitals ?? 1);
+this.sampled.spaNav  = this.pickSample(rates.spaNav  ?? 1);
+
+this.initialized = true;
 
 
-Weryfikacja:
+(Jeśli masz już this.initialized = true; – po prostu dopisz trzy linie z this.trackingAllowed = true; i ustawianiem this.sampled.* tuż przed nim.)
 
-Klikaj w linki zewnętrzne → brak dodatkowych hitów w Network.
+Gdy DNT=1 (guard wcześniej zwróci z init()), sampling nie ma znaczenia.
 
-Pageview nadal działa.
+3.4 Zmień trackPageView i trackEvent (wczesny return)
+
+Upewnij się, że na początku obu metod masz:
+
+if (!this.isActive()) return;
+
+
+Jeśli nie masz isActive(), dodaj:
+
+private isActive(): boolean {
+  return isPlatformBrowser(this.platformId) && !!environment.matomo?.enabled && this.trackingAllowed;
+}
+
+3.5 Web Vitals — dodaj sampling
+
+W metodzie trackWebVitals() (którą już masz) na samym początku dopisz:
+
+if (!this.sampled.vitals) return;
+
+3.6 SPA navigation time — dodaj dwie metody
+
+Wklej do klasy:
+
+/** Oznacz początek nawigacji SPA (start pomiaru). */
+markSpaNavStart(): void {
+  if (!this.isActive() || !this.sampled.spaNav) return;
+  this.spaNavStartTs = performance.now();
+}
+
+/** Zakończ pomiar nawigacji SPA i wyślij event. */
+reportSpaNavTiming(): void {
+  if (!this.isActive() || !this.sampled.spaNav || this.spaNavStartTs == null) return;
+  const dur = performance.now() - this.spaNavStartTs;
+  this.spaNavStartTs = null;
+
+  // Klasyfikacja (przykładowe progi)
+  const label = dur <= 1000 ? 'good' : dur <= 2500 ? 'ni' : 'poor';
+  this.trackEvent('spa-nav', 'navigation', label, Math.round(dur));
+}
+
+4) src/app/app.component.ts
+4.1 Oznacz start nawigacji
+
+Upewnij się, że importujesz NavigationStart i dodaj subskrypcję:
+
+import { Router, NavigationEnd, NavigationStart } from '@angular/router';
+...
+constructor(private readonly router: Router, private readonly matomo: MatomoService) {
+  this.matomo.init();
+
+  // START pomiaru przy rozpoczęciu nawigacji
+  this.router.events
+    .pipe(filter(e => e instanceof NavigationStart))
+    .subscribe(() => this.matomo.markSpaNavStart());
+
+  // Twój istniejący handler NavigationEnd z trackPageView...
+
+4.2 Zgłoś koniec pomiaru po renderze
+
+W istniejącej subskrypcji NavigationEnd (zaraz po this.matomo.trackPageView(...)) dodaj:
+
+// Poczekaj na „następną klatkę”, żeby objąć pierwszy render po NE
+requestAnimationFrame(() => this.matomo.reportSpaNavTiming());
+
+4.3 (Opcjonalnie) także dla pierwszego załadowania
+
+W ngAfterViewInit() (po pierwszym trackPageView) dodaj:
+
+// Pierwsze ładowanie: też zmierz czas „start → pierwszy render”
+this.matomo.markSpaNavStart();
+requestAnimationFrame(() => this.matomo.reportSpaNavTiming());
+
+
+Uwaga: „SPA navigation time” to metryka umowna (czas od startu nawigacji do pierwszego renderu po NavigationEnd). Nie zastępuje LCP/FCP, ale fajnie pokazuje opóźnienia routingowe i ciężkie efekty po przejściach.
