@@ -1,0 +1,16 @@
+﻿Krok 3 — Usuń query/hash z URL (sanityzacja)
+
+Cel: Matomo dostaje tylko ścieżkę, bez PII w query/hash.
+
+Zmień helper w app.component.ts:
+
+function currentPath(): string {
+  return window.location.pathname; // ← BEZ ?... i #...
+}
+
+
+Weryfikacja:
+
+Network → matomo.php → parametr url= bez ? i #.
+
+Pageview nadal się liczą.

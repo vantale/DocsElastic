@@ -1,0 +1,15 @@
+﻿
+Krok 4 — Wyłącz link-tracking
+
+Cel: brak automatycznych hitów przy klikach (Twoja preferencja „bez link tracking”).
+
+Zmień w init(): usuń/zakomentuj:
+
+// w._paq.push(['enableLinkTracking']); // usuwamy
+
+
+Weryfikacja:
+
+Klikaj w linki zewnętrzne → brak dodatkowych hitów w Network.
+
+Pageview nadal działa.

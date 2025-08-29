@@ -12,4 +12,4 @@ Weryfikacja:
 
 W przeglądarce włącz DNT, odśwież: żądania do matomo.php nie powinny lecieć / wizyty nie pojawiają się.
 
-Wyłącz DNT → wracają.
+Wyłącz DNT → wraca
